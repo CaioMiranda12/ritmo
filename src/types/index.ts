@@ -97,3 +97,40 @@ export interface DietDayType {
 
 export type WeekdayAssignments = Record<string, string | null>
 
+export interface HistorySession {
+  id: string
+  workoutName: string
+  finishedAt: string // ISO
+  durationMinutes: number | null
+  status: 'completed' | 'partial'
+  exerciseCount: number
+  doneSetCount: number
+}
+
+export interface HistorySet {
+  position: number
+  loadKg: number | null
+  reps: number | null
+  isDone: boolean
+}
+
+export interface HistorySessionExercise {
+  id: string // session_exercises.id
+  name: string
+  muscleGroup: string
+  equipment: string
+  note: string
+  catalogExerciseId: string | null
+  sets: HistorySet[]
+}
+
+export interface HistorySessionDetail extends HistorySession {
+  exercises: HistorySessionExercise[]
+}
+
+export interface ExerciseHistoryEntry {
+  sessionId: string
+  workoutName: string
+  finishedAt: string // ISO
+  sets: HistorySet[]
+}

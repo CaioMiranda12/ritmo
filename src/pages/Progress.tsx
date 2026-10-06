@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { fetchRecentSessions, fetchSessionsThisWeekCount } from '../api/sessions'
 import type { WeightEntry } from '../types'
+import { Link } from 'react-router-dom'
 
 export function Progress() {
   const { session } = useAuth()
@@ -151,10 +152,13 @@ export function Progress() {
             <div>
               <div className="mb-3 flex items-center justify-between">
                 <h2 className="font-semibold text-text">Sessões recentes</h2>
+                <Link to="/historico" className="text-sm font-medium text-primary hover:underline">
+                  Ver tudo
+                </Link>
               </div>
               <Card padding="none" className="divide-y divide-border px-5">
                 {recentSessions.map((sessionItem) => (
-                  <div key={sessionItem.id} className="flex items-center gap-3 py-4">
+                  <Link key={sessionItem.id} to={`/historico/${sessionItem.id}`} className="flex items-center gap-3 py-4">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-muted text-text-secondary">
                       <ArrowUpRight size={16} />
                     </div>
@@ -163,7 +167,7 @@ export function Progress() {
                       <p className="text-sm text-text-secondary">{sessionItem.dateLabel}</p>
                     </div>
                     <span className="text-sm font-medium text-primary">{sessionItem.highlight}</span>
-                  </div>
+                  </Link>
                 ))}
               </Card>
             </div>

@@ -1,5 +1,22 @@
 import { supabase } from '../lib/supabase'
-import type { SessionExercise, SessionSummary } from '../types'
+import type { ExerciseHistoryEntry, HistorySession, HistorySessionDetail, HistorySet, SessionExercise, SessionSummary } from '../types'
+
+interface RawSet {
+  position: number
+  load_kg: number | null
+  reps: number | null
+  is_done: boolean
+}
+
+interface RawHistorySession {
+  id: string
+  workout_name_snapshot: string
+  status: 'completed' | 'partial'
+  started_at: string
+  finished_at: string
+  session_exercises: { id: string; session_sets: { is_done: boolean }[] }[]
+}
+
 
 function formatRelativeDate(isoDate: string) {
   const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / (1000 * 60 * 60 * 24))
@@ -167,4 +184,171 @@ export async function fetchSessionsThisWeekCount(userId: string): Promise<number
 
   if (error) throw error
   return count ?? 0
+}
+
+function mapSet(row: RawSet): HistorySet {
+  return {
+    position: row.position,
+    loadKg: row.load_kg === null ? null : Number(row.load_kg),
+    reps: row.reps,
+    isDone: row.is_done,
+  }
+}
+
+function minutesBetween(startIso: string, endIso: string | null): number | null {
+  if (!endIso) return null
+  const minutes = Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000)
+  return minutes >= 0 ? minutes : null
+}
+
+export async function fetchSessionHistory(
+  userId: string,
+  page = 0,
+  pageSize = 20,
+): Promise<HistorySession[]> {
+  const from = page * pageSize
+  const { data, error } = await supabase
+    .from('sessions')
+    .select(
+      'id, workout_name_snapshot, status, started_at, finished_at, session_exercises(id, session_sets(is_done))',
+    )
+    .eq('user_id', userId)
+    .not('finished_at', 'is', null)
+    .order('finished_at', { ascending: false })
+    .range(from, from + pageSize - 1)
+
+  if (error) throw error
+
+  return ((data ?? []) as unknown as RawHistorySession[]).map((row) => ({
+    id: row.id,
+    workoutName: row.workout_name_snapshot,
+    finishedAt: row.finished_at,
+    durationMinutes: minutesBetween(row.started_at, row.finished_at),
+    status: row.status,
+    exerciseCount: row.session_exercises.length,
+    doneSetCount: row.session_exercises.reduce(
+      (total, ex) => total + ex.session_sets.filter((s) => s.is_done).length,
+      0,
+    ),
+  }))
+}
+
+interface RawSessionDetail {
+  id: string
+  workout_name_snapshot: string
+  status: 'completed' | 'partial'
+  started_at: string
+  finished_at: string
+  session_exercises: {
+    id: string
+    exercise_id: string | null
+    name: string
+    muscle_group: string
+    equipment: string
+    note: string
+    position: number
+    session_sets: RawSet[]
+  }[]
+}
+
+export async function fetchSessionDetail(
+  userId: string,
+  sessionId: string,
+): Promise<HistorySessionDetail | null> {
+  const { data, error } = await supabase
+    .from('sessions')
+    .select(
+      `id, workout_name_snapshot, status, started_at, finished_at,
+       session_exercises(id, exercise_id, name, muscle_group, equipment, note, position,
+         session_sets(position, load_kg, reps, is_done))`,
+    )
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  const row = data as unknown as RawSessionDetail
+  const exercises = [...row.session_exercises]
+    .sort((a, b) => a.position - b.position)
+    .map((ex) => ({
+      id: ex.id,
+      name: ex.name,
+      muscleGroup: ex.muscle_group,
+      equipment: ex.equipment,
+      note: ex.note,
+      catalogExerciseId: ex.exercise_id,
+      sets: [...ex.session_sets].sort((a, b) => a.position - b.position).map(mapSet),
+    }))
+
+  return {
+    id: row.id,
+    workoutName: row.workout_name_snapshot,
+    finishedAt: row.finished_at,
+    durationMinutes: minutesBetween(row.started_at, row.finished_at),
+    status: row.status,
+    exerciseCount: exercises.length,
+    doneSetCount: exercises.reduce((t, ex) => t + ex.sets.filter((s) => s.isDone).length, 0),
+    exercises,
+  }
+}
+
+interface RawExerciseHistory {
+  id: string
+  exercise_id: string | null
+  name: string
+  session_sets: RawSet[]
+  sessions: { id: string; workout_name_snapshot: string; finished_at: string | null; user_id: string }
+}
+
+/**
+ * Every time the user did an exercise. Matches by catalog id when available
+ * (survives renames) and falls back to the snapshot name otherwise.
+ */
+export async function fetchExerciseHistory(
+  userId: string,
+  target: { catalogExerciseId: string | null; name: string },
+  limit = 50,
+): Promise<ExerciseHistoryEntry[]> {
+  let query = supabase
+    .from('session_exercises')
+    .select(
+      'id, exercise_id, name, session_sets(position, load_kg, reps, is_done), sessions!inner(id, workout_name_snapshot, finished_at, user_id)',
+    )
+    .eq('sessions.user_id', userId)
+    .not('sessions.finished_at', 'is', null)
+
+  query = target.catalogExerciseId
+    ? query.eq('exercise_id', target.catalogExerciseId)
+    : query.eq('name', target.name)
+
+  const { data, error } = await query.limit(limit)
+  if (error) throw error
+
+  return ((data ?? []) as unknown as RawExerciseHistory[])
+    .map((row) => ({
+      sessionId: row.sessions.id,
+      workoutName: row.sessions.workout_name_snapshot,
+      finishedAt: row.sessions.finished_at as string,
+      sets: [...row.session_sets].sort((a, b) => a.position - b.position).map(mapSet),
+    }))
+    .sort((a, b) => b.finishedAt.localeCompare(a.finishedAt))
+}
+
+/** Single session_exercises row — used to resolve the route param into a catalog id + name. */
+export async function fetchSessionExerciseRef(
+  userId: string,
+  sessionExerciseId: string,
+): Promise<{ catalogExerciseId: string | null; name: string } | null> {
+  const { data, error } = await supabase
+    .from('session_exercises')
+    .select('exercise_id, name, sessions!inner(user_id)')
+    .eq('id', sessionExerciseId)
+    .eq('sessions.user_id', userId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+  return { catalogExerciseId: data.exercise_id as string | null, name: data.name as string }
 }

@@ -15,6 +15,9 @@ import { ResetPassword } from './pages/ResetPassword'
 import { Diet } from './pages/Diet'
 import { Progress } from './pages/Progress'
 import { Profile } from './pages/Profile'
+import { History } from './pages/History'
+import { HistorySessionDetail } from './pages/HistorySessionDetail'
+import { ExerciseHistory } from './pages/ExerciseHistory'
 
 function App() {
   return (
@@ -38,6 +41,10 @@ function App() {
                     <Route path="/dieta" element={<Diet />} />
                     <Route path="/progresso" element={<Progress />} />
                     <Route path="/perfil" element={<Profile />} />
+
+                    <Route path="/historico" element={<History />} />
+                    <Route path="/historico/:sessionId" element={<HistorySessionDetail />} />
+                    <Route path="/historico/exercicio/:sessionExerciseId" element={<ExerciseHistory />} />
                   </Route>
                 </Route>
               </Routes>
